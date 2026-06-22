@@ -29,6 +29,42 @@ spring:
         acknowledge-mode: auto
         prefetch: 1  # Process one message at a time per consumer
 
+  # Redis Configuration
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      password:  # Leave empty if no password
+      timeout: 2000ms
+      lettuce:
+        pool:
+          max-active: 8
+          max-idle: 8
+          min-idle: 0
+          max-wait: -1ms
+  
+  # Spring Session with Redis
+  session:
+    store-type: redis
+    timeout: 30m  # Session timeout
+    redis:
+      flush-mode: on_save
+      namespace: orchestrator:session
+
+  # Cache Configuration
+  cache:
+    type: redis
+    redis:
+      time-to-live: 600000  # Default TTL: 10 minutes (in milliseconds)
+      cache-null-values: false
+
+# Redisson Configuration (for distributed locks)
+redisson:
+  single-server-config:
+    address: redis://localhost:6379
+    connection-pool-size: 64
+    connection-minimum-idle-size: 10
+
 # Server Configuration
 server:
   port: 8080

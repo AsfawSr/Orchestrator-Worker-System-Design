@@ -2,6 +2,8 @@ package com.asfaw.Orchestrator_Worker.queue;
 
 import com.asfaw.Orchestrator_Worker.config.RabbitMQConfig;
 import com.asfaw.Orchestrator_Worker.orchestrator.TaskManager;
+import com.asfaw.Orchestrator_Worker.service.DistributedLockService;
+import com.asfaw.Orchestrator_Worker.service.TaskCacheService;
 import com.asfaw.Orchestrator_Worker.task.Task;
 import com.asfaw.Orchestrator_Worker.task.TaskResult;
 import com.asfaw.Orchestrator_Worker.task.TaskType;
@@ -39,6 +41,8 @@ public class TaskMessageListener {
     
     private final TaskManager taskManager;
     private final RabbitTemplate rabbitTemplate;
+    private final DistributedLockService lockService;
+    private final TaskCacheService cacheService;
     
     private final ComputeWorker computeWorker;
     private final IoWorker ioWorker;
@@ -54,7 +58,7 @@ public class TaskMessageListener {
     )
     public void handleComputeTask(Task task) {
         log.debug("Received COMPUTE task {} from queue", task.getTaskId());
-        processTask(task, computeWorker, TaskType.COMPUTE);
+        processTaskWithLock(task, computeWorker, TaskType.COMPUTE);
     }
     
     /**
@@ -67,7 +71,7 @@ public class TaskMessageListener {
     )
     public void handleIoTask(Task task) {
         log.debug("Received IO task {} from queue", task.getTaskId());
-        processTask(task, ioWorker, TaskType.IO);
+        processTaskWithLock(task, ioWorker, TaskType.IO);
     }
     
     /**
@@ -80,7 +84,27 @@ public class TaskMessageListener {
     )
     public void handleAiTask(Task task) {
         log.debug("Received AI task {} from queue", task.getTaskId());
-        processTask(task, aiWorker, TaskType.AI);
+        processTaskWithLock(task, aiWorker, TaskType.AI);
+    }
+    
+    /**
+     * Process task with distributed lock to prevent duplicate processing
+     */
+    private void processTaskWithLock(Task task, BaseWorker worker, TaskType taskType) {
+        String lockKey = "task:lock:" + task.getTaskId();
+        
+        // Try to acquire lock (wait 1s, hold for 60s max)
+        boolean lockAcquired = lockService.executeWithLock(
+                lockKey,
+                1,  // wait 1 second
+                60, // hold for max 60 seconds
+                () -> processTask(task, worker, taskType)
+        );
+        
+        if (!lockAcquired) {
+            log.warn("Could not acquire lock for task {} - already being processed by another instance", 
+                    task.getTaskId());
+        }
     }
     
     /**
@@ -103,6 +127,10 @@ public class TaskMessageListener {
             
             // Update task in database
             taskManager.updateTask(latestTask);
+            
+            // Update cache
+            cacheService.cacheTask(latestTask);
+            cacheService.cacheTaskStatus(latestTask.getTaskId(), latestTask.getStatus());
             
             // Handle failure with retry logic
             if (!result.isSuccess() && latestTask.canRetry()) {
@@ -130,6 +158,9 @@ public class TaskMessageListener {
         // Update task in database
         taskManager.updateTask(task);
         
+        // Invalidate cache (status changed)
+        cacheService.invalidateTask(task.getTaskId());
+        
         // Re-enqueue task to RabbitMQ for retry
         try {
             String routingKey = RabbitMQConfig.getRoutingKey(taskType);
@@ -151,6 +182,11 @@ public class TaskMessageListener {
     private void handleTaskFailure(Task task, String errorMessage) {
         task.markFailed(errorMessage);
         taskManager.updateTask(task);
+        
+        // Update cache with failed status
+        cacheService.cacheTask(task);
+        cacheService.cacheTaskStatus(task.getTaskId(), task.getStatus());
+        
         log.error("Task {} marked as FAILED: {}", task.getTaskId(), errorMessage);
     }
 }

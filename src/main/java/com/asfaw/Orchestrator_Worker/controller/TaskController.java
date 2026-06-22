@@ -4,8 +4,10 @@ import com.asfaw.Orchestrator_Worker.controller.dto.TaskRequest;
 import com.asfaw.Orchestrator_Worker.controller.dto.TaskResponse;
 import com.asfaw.Orchestrator_Worker.orchestrator.OrchestratorService;
 import com.asfaw.Orchestrator_Worker.orchestrator.TaskManager;
+import com.asfaw.Orchestrator_Worker.service.RateLimitService;
 import com.asfaw.Orchestrator_Worker.task.Task;
 import com.asfaw.Orchestrator_Worker.task.TaskStatus;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -21,7 +23,7 @@ import java.util.stream.Collectors;
 
 /**
  * REST API controller for task management.
- * Provides endpoints for task submission, status checking, and system monitoring.
+ * Now with rate limiting to protect against abuse.
  * 
  * @author TaskForge Team
  */
@@ -32,9 +34,11 @@ import java.util.stream.Collectors;
 public class TaskController {
     
     private final OrchestratorService orchestratorService;
+    private final RateLimitService rateLimitService;
     
     /**
      * Submit a new task for processing
+     * Rate limited: 100 requests per minute per IP
      * 
      * POST /api/tasks
      * 
@@ -42,9 +46,30 @@ public class TaskController {
      * @return submitted task details
      */
     @PostMapping
-    public ResponseEntity<TaskResponse> submitTask(@Valid @RequestBody TaskRequest request) {
-        log.info("Received task submission request: type={}, operation={}", 
-                request.getTaskType(), request.getPayload().get("operation"));
+    public ResponseEntity<?> submitTask(
+            @Valid @RequestBody TaskRequest request,
+            HttpServletRequest httpRequest
+    ) {
+        // Rate limiting: 100 requests per minute per IP
+        String clientIp = getClientIp(httpRequest);
+        RateLimitService.RateLimitInfo rateLimitInfo = 
+                rateLimitService.checkLimit("ip:" + clientIp, 100, 60);
+        
+        if (!rateLimitInfo.allowed()) {
+            log.warn("Rate limit exceeded for IP: {} ({}/{})", 
+                    clientIp, rateLimitInfo.currentCount(), rateLimitInfo.limit());
+            
+            Map<String, Object> error = new HashMap<>();
+            error.put("error", "Rate limit exceeded");
+            error.put("message", "Too many requests. Please try again later.");
+            error.put("retryAfter", rateLimitInfo.resetInSeconds());
+            
+            return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS).body(error);
+        }
+        
+        log.info("Received task submission request: type={}, operation={} (IP: {}, {}/{})", 
+                request.getTaskType(), request.getPayload().get("operation"),
+                clientIp, rateLimitInfo.currentCount(), rateLimitInfo.limit());
         
         try {
             // Convert request to Task entity
@@ -208,5 +233,17 @@ public class TaskController {
         response.put("status", "UP");
         response.put("service", "Orchestrator-Worker");
         return ResponseEntity.ok(response);
+    }
+    
+    /**
+     * Extract client IP address from request
+     * Handles X-Forwarded-For header for proxy/load balancer scenarios
+     */
+    private String getClientIp(HttpServletRequest request) {
+        String xForwardedFor = request.getHeader("X-Forwarded-For");
+        if (xForwardedFor != null && !xForwardedFor.isEmpty()) {
+            return xForwardedFor.split(",")[0].trim();
+        }
+        return request.getRemoteAddr();
     }
 }

@@ -1,6 +1,7 @@
 package com.asfaw.Orchestrator_Worker.orchestrator;
 
 import com.asfaw.Orchestrator_Worker.queue.TaskQueue;
+import com.asfaw.Orchestrator_Worker.service.TaskCacheService;
 import com.asfaw.Orchestrator_Worker.task.Task;
 import com.asfaw.Orchestrator_Worker.task.TaskStatus;
 import lombok.RequiredArgsConstructor;
@@ -12,12 +13,14 @@ import java.util.Optional;
 
 /**
  * Main orchestrator service - entry point for task submission and management.
- * Coordinates between the task queue, task manager, and scheduler.
+ * Now with Redis caching for improved performance.
+ * 
+ * Coordinates between the task queue, task manager, scheduler, and cache.
  * 
  * Responsibilities:
  * - Accept new task submissions
  * - Enqueue tasks for processing
- * - Provide task status and results
+ * - Provide task status and results (with caching)
  * - Manage task lifecycle
  * 
  * @author TaskForge Team
@@ -29,6 +32,7 @@ public class OrchestratorService {
     
     private final TaskQueue taskQueue;
     private final TaskManager taskManager;
+    private final TaskCacheService cacheService;
     
     /**
      * Submit a new task for processing.
@@ -79,6 +83,7 @@ public class OrchestratorService {
     
     /**
      * Get task status and details by ID
+     * Checks cache first, then database if not found
      * 
      * @param taskId the task identifier
      * @return Optional containing the task if found
@@ -89,7 +94,20 @@ public class OrchestratorService {
             return Optional.empty();
         }
         
-        return taskManager.getTask(taskId);
+        // Try cache first
+        Optional<Task> cachedTask = cacheService.getCachedTask(taskId);
+        if (cachedTask.isPresent()) {
+            log.debug("Task {} found in cache", taskId);
+            return cachedTask;
+        }
+        
+        // Fall back to database
+        Optional<Task> task = taskManager.getTask(taskId);
+        
+        // Cache for future requests
+        task.ifPresent(cacheService::cacheTask);
+        
+        return task;
     }
     
     /**
@@ -135,6 +153,9 @@ public class OrchestratorService {
         
         task.setStatus(TaskStatus.CANCELLED);
         taskManager.updateTask(task);
+        
+        // Invalidate cache
+        cacheService.invalidateTask(taskId);
         
         log.info("Task {} cancelled successfully", taskId);
         return true;

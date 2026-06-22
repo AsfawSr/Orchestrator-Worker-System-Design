@@ -1,18 +1,26 @@
 package com.asfaw.Orchestrator_Worker.config;
 
+import com.asfaw.Orchestrator_Worker.task.TaskType;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 
+import java.util.HashMap;
+import java.util.Map;
 import java.util.concurrent.ThreadPoolExecutor;
 
 /**
- * Configuration for thread pools used by workers.
- * Separate thread pools for each worker type to ensure isolation and optimal resource allocation.
+ * Flexible configuration for thread pools used by workers.
+ * Dynamically creates thread pools based on configuration for each task type.
  * 
- * Thread pool sizing considerations:
+ * Benefits of flexible approach:
+ * - Add new task types without code changes
+ * - Configure each pool independently via application.yaml
+ * - Centralized thread pool management
+ * - Easy to tune performance per task type
+ * 
+ * Thread pool sizing guidelines:
  * - COMPUTE: CPU-bound tasks, pool size ~ number of CPU cores
  * - IO: I/O-bound tasks, larger pool to handle blocking operations
  * - AI: ML/AI tasks, moderate pool size based on model complexity
@@ -23,89 +31,93 @@ import java.util.concurrent.ThreadPoolExecutor;
 @Configuration
 public class ThreadPoolConfig {
     
-    @Value("${worker.compute.pool.core-size:2}")
-    private int computePoolCoreSize;
-    
-    @Value("${worker.compute.pool.max-size:4}")
-    private int computePoolMaxSize;
-    
-    @Value("${worker.io.pool.core-size:5}")
-    private int ioPoolCoreSize;
-    
-    @Value("${worker.io.pool.max-size:10}")
-    private int ioPoolMaxSize;
-    
-    @Value("${worker.ai.pool.core-size:3}")
-    private int aiPoolCoreSize;
-    
-    @Value("${worker.ai.pool.max-size:6}")
-    private int aiPoolMaxSize;
-    
-    @Value("${worker.pool.queue-capacity:100}")
-    private int queueCapacity;
+    /**
+     * Creates thread pool executors for each task type based on configuration.
+     * This map can be injected wherever you need access to all executors.
+     * 
+     * @param properties the thread pool configuration properties
+     * @return Map of task type to thread pool executor
+     */
+    @Bean
+    public Map<TaskType, ThreadPoolTaskExecutor> taskExecutors(ThreadPoolProperties properties) {
+        Map<TaskType, ThreadPoolTaskExecutor> executors = new HashMap<>();
+        
+        // Create a thread pool for each configured task type
+        for (TaskType taskType : TaskType.values()) {
+            String typeName = taskType.name().toLowerCase();
+            ThreadPoolProperties.PoolConfig poolConfig = properties.getPools().get(typeName);
+            
+            if (poolConfig == null) {
+                log.warn("No thread pool configuration found for {}, using defaults", taskType);
+                poolConfig = ThreadPoolProperties.PoolConfig.getDefault();
+            }
+            
+            ThreadPoolTaskExecutor executor = createExecutor(
+                    taskType, 
+                    poolConfig.getCoreSize(), 
+                    poolConfig.getMaxSize(), 
+                    poolConfig.getQueueCapacity(),
+                    poolConfig.getAwaitTerminationSeconds()
+            );
+            
+            executors.put(taskType, executor);
+            
+            log.info("{} TaskExecutor initialized: core={}, max={}, queue={}, termination={}s", 
+                    taskType, 
+                    poolConfig.getCoreSize(), 
+                    poolConfig.getMaxSize(), 
+                    poolConfig.getQueueCapacity(),
+                    poolConfig.getAwaitTerminationSeconds());
+        }
+        
+        return executors;
+    }
     
     /**
-     * Thread pool for COMPUTE workers.
-     * Optimized for CPU-intensive tasks.
+     * Individual bean definitions for backward compatibility.
+     * These allow injection by name (e.g., @Qualifier("computeTaskExecutor"))
      */
     @Bean(name = "computeTaskExecutor")
-    public ThreadPoolTaskExecutor computeTaskExecutor() {
-        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
-        executor.setCorePoolSize(computePoolCoreSize);
-        executor.setMaxPoolSize(computePoolMaxSize);
-        executor.setQueueCapacity(queueCapacity);
-        executor.setThreadNamePrefix("compute-worker-");
-        executor.setRejectedExecutionHandler(new ThreadPoolExecutor.CallerRunsPolicy());
-        executor.setWaitForTasksToCompleteOnShutdown(true);
-        executor.setAwaitTerminationSeconds(60);
-        executor.initialize();
-        
-        log.info("Compute TaskExecutor initialized: core={}, max={}, queue={}", 
-                computePoolCoreSize, computePoolMaxSize, queueCapacity);
-        
-        return executor;
+    public ThreadPoolTaskExecutor computeTaskExecutor(Map<TaskType, ThreadPoolTaskExecutor> executors) {
+        return executors.get(TaskType.COMPUTE);
     }
     
-    /**
-     * Thread pool for IO workers.
-     * Larger pool size to handle blocking I/O operations efficiently.
-     */
     @Bean(name = "ioTaskExecutor")
-    public ThreadPoolTaskExecutor ioTaskExecutor() {
-        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
-        executor.setCorePoolSize(ioPoolCoreSize);
-        executor.setMaxPoolSize(ioPoolMaxSize);
-        executor.setQueueCapacity(queueCapacity);
-        executor.setThreadNamePrefix("io-worker-");
-        executor.setRejectedExecutionHandler(new ThreadPoolExecutor.CallerRunsPolicy());
-        executor.setWaitForTasksToCompleteOnShutdown(true);
-        executor.setAwaitTerminationSeconds(60);
-        executor.initialize();
-        
-        log.info("IO TaskExecutor initialized: core={}, max={}, queue={}", 
-                ioPoolCoreSize, ioPoolMaxSize, queueCapacity);
-        
-        return executor;
+    public ThreadPoolTaskExecutor ioTaskExecutor(Map<TaskType, ThreadPoolTaskExecutor> executors) {
+        return executors.get(TaskType.IO);
+    }
+    
+    @Bean(name = "aiTaskExecutor")
+    public ThreadPoolTaskExecutor aiTaskExecutor(Map<TaskType, ThreadPoolTaskExecutor> executors) {
+        return executors.get(TaskType.AI);
     }
     
     /**
-     * Thread pool for AI workers.
-     * Moderate pool size for ML/AI inference tasks.
+     * Creates and configures a thread pool executor with the given parameters.
+     * 
+     * @param taskType the task type this executor handles
+     * @param coreSize core pool size
+     * @param maxSize maximum pool size
+     * @param queueCapacity task queue capacity
+     * @param awaitTerminationSeconds seconds to wait during shutdown
+     * @return configured thread pool executor
      */
-    @Bean(name = "aiTaskExecutor")
-    public ThreadPoolTaskExecutor aiTaskExecutor() {
+    private ThreadPoolTaskExecutor createExecutor(
+            TaskType taskType, 
+            int coreSize, 
+            int maxSize, 
+            int queueCapacity,
+            int awaitTerminationSeconds) {
+        
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
-        executor.setCorePoolSize(aiPoolCoreSize);
-        executor.setMaxPoolSize(aiPoolMaxSize);
+        executor.setCorePoolSize(coreSize);
+        executor.setMaxPoolSize(maxSize);
         executor.setQueueCapacity(queueCapacity);
-        executor.setThreadNamePrefix("ai-worker-");
+        executor.setThreadNamePrefix(taskType.name().toLowerCase() + "-worker-");
         executor.setRejectedExecutionHandler(new ThreadPoolExecutor.CallerRunsPolicy());
         executor.setWaitForTasksToCompleteOnShutdown(true);
-        executor.setAwaitTerminationSeconds(60);
+        executor.setAwaitTerminationSeconds(awaitTerminationSeconds);
         executor.initialize();
-        
-        log.info("AI TaskExecutor initialized: core={}, max={}, queue={}", 
-                aiPoolCoreSize, aiPoolMaxSize, queueCapacity);
         
         return executor;
     }

@@ -16,29 +16,37 @@ logging:
   pattern:
     console: "%d{yyyy-MM-dd HH:mm:ss} - %logger{36} - %msg%n"
 
-# Worker Thread Pool Configuration
+# Worker Thread Pool Configuration (Flexible approach)
+# Add new task types simply by adding a new entry under 'pools'
 worker:
-  # Compute Worker Pool (CPU-intensive tasks)
-  compute:
-    pool:
+  pools:
+    # Compute Worker Pool (CPU-intensive tasks)
+    compute:
       core-size: 2
       max-size: 4
-  
-  # IO Worker Pool (I/O-bound tasks)
-  io:
-    pool:
+      queue-capacity: 100
+      await-termination-seconds: 60
+    
+    # IO Worker Pool (I/O-bound tasks)
+    io:
       core-size: 5
       max-size: 10
-  
-  # AI Worker Pool (ML/AI tasks)
-  ai:
-    pool:
+      queue-capacity: 100
+      await-termination-seconds: 60
+    
+    # AI Worker Pool (ML/AI tasks)
+    ai:
       core-size: 3
       max-size: 6
-  
-  # Queue capacity for each worker pool
-  pool:
-    queue-capacity: 100
+      queue-capacity: 100
+      await-termination-seconds: 60
+    
+    # Example: Add new task types without code changes
+    # video:
+    #   core-size: 2
+    #   max-size: 4
+    #   queue-capacity: 50
+    #   await-termination-seconds: 120
 
 # Management endpoints
 management:

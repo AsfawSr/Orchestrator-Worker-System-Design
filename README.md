@@ -1,14 +1,32 @@
 # Orchestrator-Worker Pattern - Spring Boot Implementation
 
-A production-ready Spring Boot application demonstrating the **Orchestrator-Worker Pattern** for distributed task processing with retry mechanisms, priority queues, and specialized worker types.
+A production-ready Spring Boot application demonstrating the **Orchestrator-Worker Pattern** for distributed task processing with PostgreSQL persistence, RabbitMQ messaging, retry mechanisms, and specialized worker types.
+
+## 🚀 Current Phase: Phase 1 Complete (PostgreSQL + RabbitMQ)
+
+✅ **Persistent Storage** - PostgreSQL database for task persistence  
+✅ **Reliable Messaging** - RabbitMQ for distributed task queuing  
+✅ **Horizontal Scaling** - Multiple application instances supported  
+✅ **Automatic Retries** - Built-in retry with dead-letter queue  
+✅ **Complete Observability** - Rich monitoring and audit trails
+
+📚 **Documentation:**
+- [Phase 1 Guide](PHASE1_RABBITMQ_POSTGRESQL.md) - Complete implementation guide
+- [Phase 1 Checklist](PHASE1_CHECKLIST.md) - Testing and verification
+- [Quick Start](QUICKSTART.md) - Get started in 5 minutes
+- [Architecture](ARCHITECTURE.md) - Deep dive into system design
+
+---
 
 ## 🎯 Architecture Overview
 
 The Orchestrator-Worker pattern separates task coordination (orchestrator) from task execution (workers), enabling:
-- **Scalability**: Workers can be scaled independently based on load
-- **Resilience**: Failed tasks are automatically retried
+- **Scalability**: Workers can be scaled horizontally across multiple instances
+- **Resilience**: Failed tasks are automatically retried with persistent storage
 - **Specialization**: Different worker types handle different task categories
 - **Asynchronous Processing**: Non-blocking task execution using thread pools
+- **Persistence**: Tasks and results survive application restarts
+- **Distributed**: RabbitMQ enables multi-instance deployments
 
 ### Components
 

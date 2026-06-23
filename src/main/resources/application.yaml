@@ -4,9 +4,9 @@ spring:
 
   # Database Configuration (PostgreSQL)
   datasource:
-    url: jdbc:postgresql://localhost:5432/orchestrator
+    url: jdbc:postgresql://localhost:5432/shipment
     username: postgres
-    password: postgres
+    password: Asfawpassword
     driver-class-name: org.postgresql.Driver
   
   jpa:
@@ -46,13 +46,6 @@ spring:
     redis:
       time-to-live: 600000  # Default TTL: 10 minutes (in milliseconds)
       cache-null-values: false
-
-# Redisson Configuration (for distributed locks)
-redisson:
-  single-server-config:
-    address: redis://localhost:6379
-    connection-pool-size: 64
-    connection-minimum-idle-size: 10
 
 # Server Configuration
 server:
@@ -100,12 +93,34 @@ worker:
     #   queue-capacity: 50
     #   await-termination-seconds: 120
 
-# Management endpoints
+# Management endpoints (Actuator + Prometheus + Tracing)
 management:
   endpoints:
     web:
       exposure:
-        include: health,info,metrics
+        include: health,info,metrics,prometheus,env,beans,threaddump,heapdump
+      base-path: /actuator
   endpoint:
     health:
       show-details: always
+      probes:
+        enabled: true  # Kubernetes liveness & readiness probes
+    metrics:
+      enabled: true
+    prometheus:
+      enabled: true
+  metrics:
+    export:
+      prometheus:
+        enabled: true
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
+    tags:
+      application: ${spring.application.name}
+  tracing:
+    sampling:
+      probability: 1.0  # Sample 100% of requests (use 0.1 for 10% in production)
+  zipkin:
+    tracing:
+      endpoint: http://localhost:9411/api/v2/spans

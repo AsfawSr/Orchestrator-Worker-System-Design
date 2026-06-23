@@ -1,6 +1,7 @@
 package com.asfaw.Orchestrator_Worker.queue;
 
 import com.asfaw.Orchestrator_Worker.config.RabbitMQConfig;
+import com.asfaw.Orchestrator_Worker.metrics.TaskMetricsService;
 import com.asfaw.Orchestrator_Worker.orchestrator.TaskManager;
 import com.asfaw.Orchestrator_Worker.service.DistributedLockService;
 import com.asfaw.Orchestrator_Worker.service.TaskCacheService;
@@ -43,6 +44,7 @@ public class TaskMessageListener {
     private final RabbitTemplate rabbitTemplate;
     private final DistributedLockService lockService;
     private final TaskCacheService cacheService;
+    private final TaskMetricsService metricsService;
     
     private final ComputeWorker computeWorker;
     private final IoWorker ioWorker;
@@ -101,6 +103,9 @@ public class TaskMessageListener {
                 () -> processTask(task, worker, taskType)
         );
         
+        // Record lock metrics
+        metricsService.recordLockAcquisition(lockAcquired);
+        
         if (!lockAcquired) {
             log.warn("Could not acquire lock for task {} - already being processed by another instance", 
                     task.getTaskId());
@@ -111,6 +116,8 @@ public class TaskMessageListener {
      * Common task processing logic
      */
     private void processTask(Task task, BaseWorker worker, TaskType taskType) {
+        long startTime = System.currentTimeMillis();
+        
         try {
             // Fetch latest task state from database
             Task latestTask = taskManager.getTask(task.getTaskId())
@@ -125,12 +132,18 @@ public class TaskMessageListener {
             // Execute task
             TaskResult result = worker.execute(latestTask);
             
+            // Calculate duration
+            long duration = System.currentTimeMillis() - startTime;
+            
             // Update task in database
             taskManager.updateTask(latestTask);
             
             // Update cache
             cacheService.cacheTask(latestTask);
             cacheService.cacheTaskStatus(latestTask.getTaskId(), latestTask.getStatus());
+            
+            // Record metrics
+            metricsService.recordTaskCompleted(taskType, latestTask.getStatus(), duration);
             
             // Handle failure with retry logic
             if (!result.isSuccess() && latestTask.canRetry()) {

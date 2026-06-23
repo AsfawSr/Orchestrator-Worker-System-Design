@@ -2,6 +2,7 @@ package com.asfaw.Orchestrator_Worker.controller;
 
 import com.asfaw.Orchestrator_Worker.controller.dto.TaskRequest;
 import com.asfaw.Orchestrator_Worker.controller.dto.TaskResponse;
+import com.asfaw.Orchestrator_Worker.metrics.TaskMetricsService;
 import com.asfaw.Orchestrator_Worker.orchestrator.OrchestratorService;
 import com.asfaw.Orchestrator_Worker.orchestrator.TaskManager;
 import com.asfaw.Orchestrator_Worker.service.RateLimitService;
@@ -35,6 +36,7 @@ public class TaskController {
     
     private final OrchestratorService orchestratorService;
     private final RateLimitService rateLimitService;
+    private final TaskMetricsService metricsService;
     
     /**
      * Submit a new task for processing
@@ -58,6 +60,9 @@ public class TaskController {
         if (!rateLimitInfo.allowed()) {
             log.warn("Rate limit exceeded for IP: {} ({}/{})", 
                     clientIp, rateLimitInfo.currentCount(), rateLimitInfo.limit());
+            
+            // Record metrics
+            metricsService.recordRateLimitViolation(clientIp);
             
             Map<String, Object> error = new HashMap<>();
             error.put("error", "Rate limit exceeded");

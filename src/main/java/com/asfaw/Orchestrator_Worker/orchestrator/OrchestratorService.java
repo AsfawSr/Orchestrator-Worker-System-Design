@@ -1,5 +1,6 @@
 package com.asfaw.Orchestrator_Worker.orchestrator;
 
+import com.asfaw.Orchestrator_Worker.metrics.TaskMetricsService;
 import com.asfaw.Orchestrator_Worker.queue.TaskQueue;
 import com.asfaw.Orchestrator_Worker.service.TaskCacheService;
 import com.asfaw.Orchestrator_Worker.task.Task;
@@ -13,15 +14,7 @@ import java.util.Optional;
 
 /**
  * Main orchestrator service - entry point for task submission and management.
- * Now with Redis caching for improved performance.
- * 
- * Coordinates between the task queue, task manager, scheduler, and cache.
- * 
- * Responsibilities:
- * - Accept new task submissions
- * - Enqueue tasks for processing
- * - Provide task status and results (with caching)
- * - Manage task lifecycle
+ * Now with metrics tracking for observability.
  * 
  * @author TaskForge Team
  */
@@ -33,6 +26,7 @@ public class OrchestratorService {
     private final TaskQueue taskQueue;
     private final TaskManager taskManager;
     private final TaskCacheService cacheService;
+    private final TaskMetricsService metricsService;
     
     /**
      * Submit a new task for processing.
@@ -78,6 +72,9 @@ public class OrchestratorService {
         log.info("Task {} submitted successfully. Type: {}, Priority: {}", 
                 task.getTaskId(), task.getTaskType(), task.getPriority());
         
+        // Record metrics
+        metricsService.recordTaskSubmitted(task.getTaskType());
+        
         return task;
     }
     
@@ -98,10 +95,12 @@ public class OrchestratorService {
         Optional<Task> cachedTask = cacheService.getCachedTask(taskId);
         if (cachedTask.isPresent()) {
             log.debug("Task {} found in cache", taskId);
+            metricsService.recordCacheHit(true);
             return cachedTask;
         }
         
         // Fall back to database
+        metricsService.recordCacheHit(false);
         Optional<Task> task = taskManager.getTask(taskId);
         
         // Cache for future requests
